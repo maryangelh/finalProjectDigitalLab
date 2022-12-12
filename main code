@@ -1,0 +1,560 @@
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_PCD8544.h>
+#include "Adafruit_MPR121.h"
+#include <Wire.h>
+#ifndef _BV
+#define _BV(bit) (1 << (bit)) 
+#endif
+
+#define NUMFLAKES 10
+#define XPOS 0
+#define YPOS 1
+#define DELTAY 2
+
+#define LOGO16_GLCD_HEIGHT 16
+#define LOGO16_GLCD_WIDTH  16
+static const unsigned char PROGMEM logo16_glcd_bmp[] =
+{ 0B00001111, 0B11111100,
+  0B00001111, 0B11111100,
+  0B00001100, 0B00001100,
+  0B00001100, 0B00001100,
+  0B00001100, 0B00001100,
+  0B00001100, 0B00001100,
+  0B00001100, 0B00001100,
+  0B00001100, 0B00001100,
+  0B00001100, 0B00001100,
+  0B00001100, 0B00001100,
+  0B00011100, 0B00011100,
+  0B01111100, 0B01111100,
+  0B11111100, 0B11111100,
+  0B11111000, 0B11111000,
+  0B01110000, 0B01110000,
+  0B00000000, 0B00000000 };
+
+String keyArray[2][14] {{"A","B","C","D","E","F","G","Ab","Bb","Db","Eb","Gb"},
+         {"Am","Bm","Cm","Dm","Em","Fm","Gm","Abm","Bbm","Dbm","Ebm","Gbm"},};
+
+Adafruit_PCD8544 display = Adafruit_PCD8544(17, 16, 15, 14, 13);
+Adafruit_MPR121 cap = Adafruit_MPR121();
+
+// Keeps track of the last pins touched
+// so we know when buttons are 'released'
+uint16_t lasttouched = 0;
+uint16_t currtouched = 0;
+bool x = true;
+int bassnote = 60;
+int key = 1;
+int octave = 12; 
+int tempo = 500;
+int bpm = 135;
+int sequence = 3;
+uint8_t i = 16;
+
+int majorScalesChords [12][36] {
+{40,44,47,41,45,49,42,45,49,43,47,50,44,47,50,00,49,52,46,49,52,47,50,54,48,51,54,49,52,56,50,54,57,51,54,57}, //A
+{40,44,47,41,44,47,42,46,49,43,47,50,44,47,51,45,49,52,46,49,52,47,51,54,48,51,54,49,52,56,50,53,56,51,54,58}, //B
+{40,43,47,41,45,48,42,45,48,43,47,50,44,47,50,45,48,52,46,50,53,47,50,53,48,52,55,49,52,55,50,53,57,51,54,57}, //C
+{40,43,47,41,44,47,42,45,49,43,47,50,44,47,50,45,49,52,46,49,52,47,50,54,48,52,55,49,52,55,50,54,57,51,54,57}, //D
+{40,44,47,41,44,47,42,45,49,43,46,49,44,47,51,45,49,52,46,49,52,47,51,54,48,51,54,49,52,56,50,54,57,51,54,57}, //E
+{40,43,46,41,45,48,42,45,48,43,46,50,44,47,50,45,48,52,46,50,53,47,50,53,48,52,55,49,52,55,50,53,57,51,55,58}, //F
+{40,43,47,41,45,48,42,45,48,43,47,50,44,47,50,45,48,52,46,49,52,47,50,54,48,52,55,49,52,55,50,54,57,51,54,57}, //G
+{40,43,46,41,44,48,42,46,49,43,46,49,44,48,51,45,48,51,46,49,53,47,50,53,48,51,55,49,53,56,50,53,56,51,55,58}, //AB
+{40,43,46,41,45,48,42,45,48,43,46,50,44,48,51,45,48,51,46,50,53,47,50,53,48,51,55,49,52,55,50,53,57,51,55,58}, //BB
+{40,43,46,41,44,48,42,46,49,43,46,49,44,48,51,45,48,51,46,49,53,47,51,54,48,51,54,49,53,56,50,53,56,51,54,58}, //DB
+{40,43,46,41,44,48,42,45,48,43,46,50,44,48,51,45,48,51,46,50,53,47,50,53,48,51,55,49,53,56,50,53,56,51,55,58}, //EB
+{40,43,46,41,44,48,42,46,49,43,46,49,44,48,51,45,48,51,46,49,53,47,51,54,48,51,54,49,53,56,50,53,56,51,54,58}, //GB
+};
+
+int minorScalesChords[12][36] {
+{40,43,47,41,45,48,42,45,48,43,47,50,44,47,52,45,48,52,46,50,53,47,50,53,48,52,55,49,53,57,50,53,57,51,55,59},//Am
+{40,43,47,41,45,49,42,45,49,43,47,50,44,47,50,45,49,52,46,49,54,47,50,54,48,52,55,49,52,55,50,54,57,51,55,59},//Bm
+{40,44,48,41,44,48,42,46,50,43,46,50,44,48,51,45,48,51,46,50,53,47,50,55,48,51,55,49,53,56,50,53,56,51,55,58},//Cm
+{40,43,46,41,45,48,42,46,50,43,46,50,44,48,52,45,48,52,46,50,53,47,50,53,48,52,55,49,52,57,50,53,57,51,55,58},//Dm
+{40,43,47,41,45,48,42,45,48,43,47,50,44,48,52,45,48,52,46,50,54,47,50,54,48,52,55,49,52,55,50,54,57,51,54,59},//em
+{40,43,48,41,44,48,42,46,49,43,46,49,44,48,51,45,49,53,46,49,53,47,51,55,48,51,55,49,53,56,50,53,56,51,55,58},//fm
+{40,43,46,41,45,48,42,45,50,43,46,50,44,48,51,45,48,51,46,50,53,47,51,55,48,51,55,49,53,57,50,53,57,51,55,58},//gm
+{40,44,47,41,44,47,42,46,49,43,46,51,44,47,51,45,49,52,46,49,52,47,51,54,48,52,56,49,52,56,50,54,58,51,54,58},//abm
+{40,44,48,41,44,48,42,46,49,43,46,49,44,48,51,45,48,53,46,49,53,47,51,54,48,51,54,49,53,56,50,54,58,51,54,58},//bbm
+{40,44,47,41,45,49,42,45,49,43,47,51,44,47,51,45,49,52,46,49,52,47,51,54,48,51,56,49,52,56,50,54,57,51,54,57},//dbm
+{40,44,47,41,44,47,42,46,49,43,47,51,44,47,51,45,49,53,46,49,53,47,51,54,48,51,54,49,53,56,50,53,58,51,54,58},//ebm
+{40,44,47,41,44,49,42,45,49,43,47,50,44,47,50,45,49,52,46,50,54,47,50,54,48,52,56,49,52,56,50,53,57,51,54,58},//gbm
+};
+volatile boolean up = false;
+volatile boolean down = false;
+volatile boolean Select = false;
+int downButtonState = 0;
+int upButtonState = 0;  
+int selectButtonState = 0;          
+int lastDownButtonState = 0;
+int lastSelectButtonState = 0;
+int lastUpButtonState = 0;
+
+int page = 8;
+int menuitem = 1;
+int quality = 0;
+
+void setup() {
+  pinMode(33, INPUT_PULLUP); //set buttons
+  pinMode(34, INPUT_PULLUP);
+  pinMode(35, INPUT_PULLUP);
+  Serial.begin(9600);
+
+  while (!Serial) { // needed to keep leonardo/micro from starting too fast!
+    delay(10);
+  }
+  
+  Serial.println("Adafruit MPR121 Capacitive Touch sensor test"); 
+  
+  // Default address is 0x5A, if tied to 3.3V its 0x5B
+  // If tied to SDA its 0x5C and if SCL then 0x5D
+  if (!cap.begin(0x5A)) {
+    Serial.println("MPR121 not found, check wiring?");
+    while (1);
+  }
+  Serial.println("MPR121 found!");
+  
+
+    display.begin();          //start display
+  display.setContrast(50); 
+  display.setRotation(2);
+  display.clearDisplay(); 
+  display.display();
+}
+
+void loop() {
+  downButtonState = digitalRead(35);
+  selectButtonState = digitalRead(33);
+  upButtonState =   digitalRead(34);
+  
+  checkIfDownButtonIsPressed();
+  checkIfUpButtonIsPressed();
+  checkIfSelectButtonIsPressed();
+  if (page == 8) {
+    readGuitar();
+  }
+  
+  changeKey();
+  changeTempo();
+  drawMenu();
+  selectMenuItem();
+  pageSelect();
+  
+}
+void checkIfDownButtonIsPressed(){
+    if (downButtonState != lastDownButtonState) {
+    if (downButtonState == 0) {
+      Serial.println("1c");
+      down=true;
+    }
+    delay(50);
+  }
+   lastDownButtonState = downButtonState;
+  }
+
+void checkIfUpButtonIsPressed(){
+  if (upButtonState != lastUpButtonState) {
+    if (upButtonState == 0) {
+      up=true;
+    }
+    delay(50);
+  }
+   lastUpButtonState = upButtonState;
+}
+
+void checkIfSelectButtonIsPressed(){
+   if (selectButtonState != lastSelectButtonState) {
+    if (selectButtonState == 0) {
+      Select=true;
+    }
+    delay(50);
+  }
+   lastSelectButtonState = selectButtonState;
+}
+
+void drawHeading(String text, int startPlace) {
+    display.setTextSize(1);
+    display.clearDisplay();
+    display.setTextColor(BLACK, WHITE);
+    display.setCursor(startPlace, 0);
+    display.print(text);
+    display.drawFastHLine(0,10,83,BLACK);
+    display.setCursor(0, 15);
+  
+}
+void highlightChoice(int itemNum){
+  if (menuitem==itemNum) 
+    { 
+      display.setTextColor(WHITE, BLACK);
+    }
+    else 
+    {
+      display.setTextColor(BLACK, WHITE);
+    }
+}
+void drawMenu(){
+  if (page==1)  {                           //Page 1 menu : Tempo : Key : Sequence   
+    drawHeading("PIANO BUDDY",10);
+   highlightChoice(1);
+    display.write(i);
+    display.print(" TEMPO: ");
+    display.print(bpm);
+    display.setCursor(0, 25);
+    highlightChoice(2); 
+    display.write(i);    
+    display.print(" KEY: ");
+    display.print(keyArray[quality][key]);
+    display.display();
+    highlightChoice(3);  
+    display.setCursor(0, 35);
+    display.write(i);    
+    display.print(" SEQUENCE");
+    display.display();
+  }
+  else if (page==2) {                     //Page 2 Tempo : BPM
+    drawHeading("TEMPO",25);
+    display.print("BPM");
+    display.setTextSize(2);
+    display.setCursor(5, 25);
+    display.print(bpm);
+    display.setTextSize(2);
+    display.display();
+   }
+  else if (page == 3) {                   //Page 3 Key : Exit
+    drawHeading("KEY",32);
+    highlightChoice(1);                     //key
+    display.write(i);
+    display.print("Key:  ");
+    display.print(keyArray[quality][key]);
+    display.display();
+    display.setCursor(0, 25);
+    highlightChoice(2);                     //major
+    display.write(i);
+    display.print("Major");
+    display.display();
+    highlightChoice(3);                      //minor
+    display.setCursor(40, 25);
+    display.write(i);
+     display.print("Minor");
+    display.display();
+    display.setCursor(0, 35);
+    highlightChoice(4);                       //Exit
+    display.write(i);
+    display.print("Exit");
+    display.display();
+  }
+  else if (page == 4) {                           // Page 4 Sequence
+    drawHeading("SEQUENCE",20);
+    highlightChoice(1);
+    display.write(i);
+    display.print("Bassline");
+    display.setCursor(0, 25);
+    highlightChoice(2);
+    display.write(i);
+    display.print("PianoComp 1");
+    highlightChoice(3);
+    display.setCursor(0, 35);
+    display.write(i);
+    display.print("PianoComp 2");
+    display.display();
+  }else if (page == 5) {                      // Key : Choose key
+    drawHeading("KEY",32);
+    display.setCursor(32, 23);
+    display.setTextSize(2);
+    display.print(keyArray[quality][key]);
+    display.setTextSize(1);
+    display.display();
+  } else if (page == 7) {                     // Start/Back
+    display.setTextSize(2);
+    display.clearDisplay();
+    display.setTextColor(BLACK, WHITE);
+    display.drawFastHLine(0,0,83,BLACK);
+    display.setCursor(12, 5);
+    highlightChoice(1);
+    display.print("START");
+    display.setCursor(17, 25);
+    highlightChoice(2);
+    display.print("BACK");
+    display.drawFastHLine(0,45,83,BLACK);
+    display.display();
+  }
+    else if (page == 8) { 
+    display.clearDisplay();
+      display.drawBitmap(30, 16,  logo16_glcd_bmp, 16, 16, 1); //page = 8
+    display.display();
+  }
+  
+  }
+void changeTempo() { //cycle through on page 2
+  if (page == 2) {
+    if (up) {
+    up = false;
+    bpm++;
+    } else if (down) {
+    down = false;
+    bpm--;
+  }
+   if (tempo < 0) {
+    bpm = 1;
+  }
+}
+}
+void changeKey() {        //cycle through on page 5
+   if (key == -1) {
+    key = 11;
+  }
+  if (key == 12) {
+    key = 0;
+  }
+ if (page == 5) {
+    if (up) {
+    up = false;
+    key--    ;
+    } else if (down) {
+    down = false;
+    key++;
+  }
+  
+}
+}
+
+void selectMenuItem() {         // select menuitems page 1,3,4,7
+  if (page == 1 or page ==4) {
+    if (menuitem==0){
+      menuitem=3;
+    }
+    if (menuitem==4) {
+      menuitem=1;
+    } 
+    if (up) {
+    up = false;
+    menuitem--;
+    } else if (down) {
+    down = false;
+    menuitem++;
+    }
+    }
+  if (page == 3) {
+    if (menuitem < 1){
+      menuitem=4;
+    }
+    if (menuitem > 4) {
+      menuitem=1;
+    } 
+    if (up) {
+    up = false;
+    menuitem--;
+    } else if (down) {
+    down = false;
+    menuitem++;
+    }
+  Serial.println(menuitem);
+    }
+  if (page == 7 ) {
+    if (menuitem < 1){
+      menuitem=2;
+    }
+    if (menuitem > 2) {
+      menuitem=1;
+    } 
+    if (up) {
+    up = false;
+    menuitem--;
+    } else if (down) {
+    down = false;
+    menuitem++;
+    }
+  }
+    
+  }
+void pageSelect() {
+if (Select) {
+    Select = false;
+    if (page == 1) {
+      if (menuitem == 1) {
+        page = 2;
+      } else if (menuitem == 2) {
+        menuitem = 1;
+        page = 3;
+      } else if (menuitem == 3) {
+        menuitem = 1;
+        page = 4;
+      }
+    } else if (page == 2) {
+      page = 1;
+    } else if (page == 3) {
+      if (menuitem == 1) {
+        page = 5;
+      } else if (menuitem == 2) {
+        quality = 0;
+      } else if (menuitem == 3) {
+        quality = 1;
+      } else if (menuitem == 4) {
+        page = 1;
+      }
+    } else if (page == 5) {
+      page =3;
+    } else if (page == 4) {
+      menuitem = 1;
+      page = 7;
+      if (menuitem == 1) {
+         sequence = 1;
+      } else if (menuitem == 2) {
+         sequence = 2;
+      } else if (menuitem ==3) {
+         sequence = 3;
+      }
+    } else if (page == 7) {
+      if (menuitem == 1) {
+        menuitem = 1;
+        page = 8;
+        Serial.println("ON");
+      } else if (menuitem == 2) {
+        page = 1;
+      }
+    } else if (page == 8){
+      page = 1;
+    }
+   }
+}
+void bpmConvert(){
+  tempo = 60000/bpm;
+} 
+
+void readGuitar() {
+  bpmConvert();
+  // Get the currently touched pads
+  currtouched = cap.touched();
+  for (uint8_t i=0; i<12; i++) {
+    // it if *is* touched and *wasnt* touched before, alert!
+    if ((currtouched & _BV(i)) && !(lasttouched & _BV(i)) ) {
+      x = true;
+      bassnote = i*3;
+      while (x) { // play stuff
+        currtouched = cap.touched();
+          playMusic();
+        Serial.print(i); Serial.println(" touched");
+        // 
+        if (!(currtouched & _BV(i)) && (lasttouched & _BV(i))) {
+          Serial.println("IN");
+          x = false;
+          break;
+        }
+        lasttouched = currtouched;
+      }
+    }
+    // if it *was* touched and now *isnt*, alert!
+    if (!(currtouched & _BV(i)) && (lasttouched & _BV(i)) ) {
+      Serial.print(i); Serial.println(" released");
+    }
+  }
+
+  // reset our state
+  lasttouched = currtouched;
+}
+void pianoComp() {
+  if (quality == 0) {
+  usbMIDI.sendNoteOn((majorScalesChords[key][bassnote])+octave,100,1);
+    delay(tempo);
+    usbMIDI.sendNoteOn((majorScalesChords[key][bassnote+1])+octave,95,1);
+    usbMIDI.sendNoteOn((majorScalesChords[key][bassnote+2])+octave,95,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOff((majorScalesChords[key][bassnote])+octave,0,1);
+    usbMIDI.sendNoteOff((majorScalesChords[key][bassnote+1])+octave,0,1);
+    usbMIDI.sendNoteOff((majorScalesChords[key][bassnote+2])+octave,0,1);
+    delay(tempo/2);
+  usbMIDI.sendNoteOn((majorScalesChords[key][bassnote])+octave,100,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOn((majorScalesChords[key][bassnote+1])+octave,95,1);
+    usbMIDI.sendNoteOn((majorScalesChords[key][bassnote+2])+octave,95,1);
+    delay(tempo);
+    usbMIDI.sendNoteOff((majorScalesChords[key][bassnote])+octave,0,1);
+    usbMIDI.sendNoteOff((majorScalesChords[key][bassnote+1])+octave,0,1);
+    usbMIDI.sendNoteOff((majorScalesChords[key][bassnote+2])+octave,0,1);
+    delay(tempo/2);
+  }
+  if (quality == 1) {
+    usbMIDI.sendNoteOn((minorScalesChords[key][bassnote])+octave,100,1);
+    delay(tempo);
+    usbMIDI.sendNoteOn((minorScalesChords[key][bassnote+1])+octave,95,1);
+    usbMIDI.sendNoteOn((minorScalesChords[key][bassnote+2])+octave,95,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOff((minorScalesChords[key][bassnote])+octave,0,1);
+    usbMIDI.sendNoteOff((minorScalesChords[key][bassnote+1])+octave,0,1);
+    usbMIDI.sendNoteOff((minorScalesChords[key][bassnote+2])+octave,0,1);
+    delay(tempo/2);
+  usbMIDI.sendNoteOn((minorScalesChords[key][bassnote])+octave,100,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOn((minorScalesChords[key][bassnote+1])+octave,95,1);
+    usbMIDI.sendNoteOn((minorScalesChords[key][bassnote+2])+octave,95,1);
+    delay(tempo);
+    usbMIDI.sendNoteOff((minorScalesChords[key][bassnote])+octave,0,1);
+    usbMIDI.sendNoteOff((minorScalesChords[key][bassnote+1])+octave,0,1);
+    usbMIDI.sendNoteOff((minorScalesChords[key][bassnote+2])+octave,0,1);
+    delay(tempo/2);
+  }
+    
+}
+void bassline1() {
+  if (quality == 0) {
+    usbMIDI.sendNoteOn((majorScalesChords[key][bassnote]),100,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOff((majorScalesChords[key][bassnote]),0,1);
+    usbMIDI.sendNoteOn((majorScalesChords[key][bassnote]),95,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOff((majorScalesChords[key][bassnote]),0,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOn((majorScalesChords[key][bassnote]),100,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOff((majorScalesChords[key][bassnote]),0,1);
+  }
+  if (quality == 1) {
+    usbMIDI.sendNoteOn((minorScalesChords[key][bassnote]),100,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOff((minorScalesChords[key][bassnote]),0,1);
+    usbMIDI.sendNoteOn((minorScalesChords[key][bassnote]),95,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOff((minorScalesChords[key][bassnote]),0,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOn((minorScalesChords[key][bassnote]),100,1);
+    delay(tempo/2);
+    usbMIDI.sendNoteOff((minorScalesChords[key][bassnote]),0,1);
+  }
+}
+void sleepy() {
+  if (quality == 0) {
+  usbMIDI.sendNoteOn((majorScalesChords[key][bassnote]+octave),70,1);
+  usbMIDI.sendNoteOn((majorScalesChords[key][bassnote+2]+octave),70,1);
+  delay(tempo);
+  usbMIDI.sendNoteOn((majorScalesChords[key][bassnote+1]),95,1);
+  delay(tempo);
+  usbMIDI.sendNoteOff((majorScalesChords[key][bassnote+1]),0,1);
+  usbMIDI.sendNoteOn((majorScalesChords[key][bassnote+1])+1,85,1);
+  delay(tempo);
+  usbMIDI.sendNoteOff((majorScalesChords[key][bassnote]+octave),0,1);
+  usbMIDI.sendNoteOff((majorScalesChords[key][bassnote+2]+octave),0,1);
+  usbMIDI.sendNoteOff((majorScalesChords[key][bassnote+1]+1),0,1);
+  } 
+  if (quality == 1) {
+  usbMIDI.sendNoteOn((minorScalesChords[key][bassnote]+octave),70,1);
+  usbMIDI.sendNoteOn((minorScalesChords[key][bassnote+2]+octave),70,1);
+  delay(tempo);
+  usbMIDI.sendNoteOn((minorScalesChords[key][bassnote+1]),95,1);
+  delay(tempo);
+  usbMIDI.sendNoteOff((minorScalesChords[key][bassnote+1]),0,1);
+  usbMIDI.sendNoteOn((minorScalesChords[key][bassnote+1])+1,85,1);
+  delay(tempo);
+  usbMIDI.sendNoteOff((minorScalesChords[key][bassnote]+octave),0,1);
+  usbMIDI.sendNoteOff((minorScalesChords[key][bassnote+2]+octave),0,1);
+  usbMIDI.sendNoteOff((minorScalesChords[key][bassnote+1]+1),0,1); 
+  }
+}
+void playMusic(){
+  if (sequence == 1) {
+    bassline1();
+    } else if (sequence == 2) {
+      pianoComp();
+  } else if (sequence == 3) {
+    sleepy();
+  }
+}
