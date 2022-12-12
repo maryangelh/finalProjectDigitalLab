@@ -1,0 +1,129 @@
+This is the Pianno Buddy a self playing instrument that checks which fret is currently pressed on you guitar and plays along.
+
+The first part of this project I tackled was the menu screen, since this was the first part that came in. I ended up using the code from this video (https://www.youtube.com/watch?v=VtZvf5T98FI) as the outline for my own menus screen. The most important part of the menu screen that I focused on was making it easy to navigate which meant I had to create many new "pages", or new screens, to organize the settings properly. In total there are 7 possible screens that could show up.
+
+page 1 = main menu
+page 2 = tempo edit
+page 3  = key edit
+page 4 = sequence selection
+page 5 = key selection
+page 6 = *skipped*
+page 7 = start/back
+page 8 = music eighth note
+
+
+The drawMenu() fucntions was used to create these different pages. Page 1 was the first Menu screen which asked users if they wanted to change tempo, key, or sequence. The hard part to figure out was how to highlight the current possible suggestion to make it obvious to the user that this is the option they are selecting. I created the highlighChoice function () :
+void highlightChoice(int itemNum){
+
+  if (menuitem==itemNum) 
+    { 
+      display.setTextColor(WHITE, BLACK);
+    }
+    else 
+    {
+      display.setTextColor(BLACK, WHITE);
+    }
+}
+
+This took in one argument which compared it to what menu item we were one. If we increased the menu item using the buttons it would highlight the next item on the screen and if we decreased it would highlight the previous one. 
+
+In order to navigate through the pages I used the pageSelect() function which helped change pages based on when the enter key was pressed. This was made possible through the use of multiple nested if/else statements. For example in the code below; If the enter key was pressed on page 1(The menu) while tempo was highlighted (which ment menuitem == 1) it would then send the user to page 2 (Tempo Edit) and then when it was pressed at any time while on page 2; it would send the user back to page 1 (The menu). This then was repeated with every possible option.
+void pageSelect() {
+
+if (Select) {
+    Select = false;
+    if (page == 1) {
+      if (menuitem == 1) {
+        page = 2;
+      } else if (menuitem == 2) {
+        menuitem = 1;
+        page = 3;
+      } else if (menuitem == 3) {
+        menuitem = 1;
+        page = 4;
+      }
+    } else if (page == 2) {
+      page = 1;
+    }...
+    }
+    
+In order to interact with the screens I had to firgure out my buttons. I settled with three buttons; on up, one down, and an enter key. The code I was basing the menu screen on was using a button code which required the use of the volatile booleans which... I left this intact as as it made for easy navigation and worked well with the buttons I had. I created a better button code for the three buttons. Ex.
+
+void checkIfDownButtonIsPressed(){
+    if (downButtonState != lastDownButtonState) {
+    if (downButtonState == 0) {
+      Serial.println("1c");
+      down=true;
+    }
+    delay(50);
+  }
+   lastDownButtonState = downButtonState;
+  }
+
+What I quickly realized is that these buttons were going to be controling much more. Not only did they control the opions on the menu screen, but the options on every screen. Ihis meant I had to made a couple of functions that gave the buttons different conditions based on what screen we were on. For example in the Key selection screen they needed to be able to cycle through all the keys in my array without exceeding the limits so I had this code:
+      
+      void changeKey() {        //cycle through on page 5
+        if (key == -1) {
+        key = 11;
+        }
+        if (key == 12) {
+        key = 0;
+        }
+        if (page == 5) {
+        if (up) {
+        up = false;
+        key--    ;
+         } else if (down) {
+        down = false;
+        key++;
+        }
+        }
+        }
+
+This checked if any of the directional keys were pressed and if they were they would increase or decrease the variable key. It would at the beginning make sure its withtin the acceptable range and if not correct it. This was then modified for tempo and selection menu options on different pages with their respective parameters.
+
+The second part was adding the capacitive touch sensor to my project which enabled me to pressed a fret on the guitar and have the piano buddy play along based on what i was playing.
+
+The first challenge was ignoring all other touches that wasnt the main inentional one. The intentional one and the one i wanted was the bassnote of the chord which decided what chord we were on. The origial code was similar to the betterbutton code except that it checked all twelve of the sensors at the same timewhich meant if a chord landed on more than one space the piano buddy would have registered it as two seperate chords. The way i got around it was using a while loop that stopped and trapped the currently pressed sensor.
+
+for (uint8_t i=0; i<12; i++) {
+    // it if *is* touched and *wasnt* touched before, alert!
+ if ((currtouched & _BV(i)) && !(lasttouched & _BV(i)) ) {
+      x = true;
+      bassnote = i*3;
+      while (x) { // play stuff
+        currtouched = cap.touched();
+          playMusic();
+        Serial.print(i); Serial.println(" touched");
+        // 
+        if (!(currtouched & _BV(i)) && (lasttouched & _BV(i))) {
+          Serial.println("IN");
+          x = false;
+          break;
+        }
+        lasttouched = currtouched;
+      }
+    }
+    // if it *was* touched and now *isnt*, alert!
+    if (!(currtouched & _BV(i)) && (lasttouched & _BV(i)) ) {
+      Serial.print(i); Serial.println(" released");
+    }
+  }
+    
+If a new sensor that wasnt previosuly touched, was now touched, it made x true which enabled the while loop to check the sensors, run the playMusic() function, and then check if the sensor is no longer touched. if it was released it would enter the if statement and break the while loop and stop playMusic();
+
+The playMusic function had to be inside the while loop in order for it to be called hwile it was frozen on a sensor. This meant my sequences couldnt be too long or else it would mame or some awkward pauses. I considered adding some sensor checks into the sequences but sometime it added wierd delays in my sequence so ultimately i made the sequences a bit shorter and easier to loop and cutoff.
+
+the playMusic function called for the three preset sequences and based on which sequence the user selected would play it.
+
+The hardest part about making thee sequences was deciding how to takle staying in key. This resulted in the creation of two note arrays, one minor and one major which held notes that were acceptable to play in their respective keys. The arrays held notes in groups of three and the groups went up chromatically starting from midi note 40 till 51. This is why in the touch sensor function the bass note is equal to i * 3.
+ex. ( the lines arent in the actual code just used to demostrate the grouping within the array)
+
+key of A Major {40,44,47|41,45,49|42,45,49|43,47,50|44,47,50|45,49,52|46,50,54|47,50,54|48,52,56|49,52,56|50,54,57|51,54,57}
+
+ To reach any of the note apart of their chords i would add a +1 or +2 to the index when called.
+ ex. usbMIDI.sendNoteOn((majorScalesChords[key][bassnote+2]+octave),70,1);
+ 
+ In term of the physical electronics, i soldered it onto perf board and created a quick enclosure from shope shipping packaging. I used male and female headers to attached and detach the wires coming from the guitar to the sensor. Hardest part was not melting the plastic for the headers. The guitar had long cable running from it and was attaced useding copper table and elctrical tape. I had to stack some elctrical tape in order to raise my frey board a bit so that the string made contact with the conductiove foil. Hardest part was keeping everything neat so that there wasnt any unwanted touches.
+ 
+ this did make playing a bt weird because natural my palm want to rest on the string but weird touches will sometime activate or not activate the intended fret sensor. 
